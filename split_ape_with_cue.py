@@ -23,20 +23,6 @@ formatter = logging.Formatter("[%(levelname)s] %(message)s")
 console.setFormatter(formatter)
 logging.getLogger().addHandler(console)
 
-# === FIND MATCHING .APE + .CUE PAIRS ===
-def find_ape_cue_pairs(root_dir):
-    pairs = []
-    for dirpath, _, filenames in os.walk(root_dir):
-        cue_files = [f for f in filenames if f.lower().endswith(".cue")]
-        for cue_file in cue_files:
-            cue_path = os.path.join(dirpath, cue_file)
-            base = os.path.splitext(cue_file)[0]
-            possible_ape = os.path.join(dirpath, base + ".ape")
-            if os.path.exists(possible_ape):
-                pairs.append((possible_ape, cue_path))
-            else:
-                logging.warning(f"No matching APE file for: {cue_path}")
-    return pairs
 
 # === CHECK IF FLAC FILE IS TAGGED ===
 def is_flac_tagged(file_path):
@@ -68,12 +54,17 @@ def split_ape_to_flac(ape_path, cue_path):
     logging.info(f"🎵 Processing: {ape_path} with {cue_path}")
 
     try:
-        # Step 1: Decode APE to WAV
-        subprocess.run(["mac", ape_path, wav_path, "-d"], check=True)
+        if ape_path.endswith(".ape"):
+            # Step 1: Decode APE to WAV
+            subprocess.run(["mac", ape_path, wav_path, "-d"], check=True)
+            middle_file = wav_path
+        else:
+            logging.info(f"Skipping conversion for {ape_path}: already FLAC")
+            middle_file = ape_path
 
         # Step 2: Split WAV to FLAC with named output
         subprocess.run([
-            "shntool", "split", "-f", cue_path, "-t", "%n - %t", "-o", "flac", wav_path
+            "shntool", "split", "-f", cue_path, "-t", "%n - %t", "-o", "flac", middle_file
         ], check=True, cwd=base_dir)
 
         # Step 3: Tag files only if they are not tagged yet
@@ -105,7 +96,8 @@ def split_ape_to_flac(ape_path, cue_path):
             logging.info("ℹ️ Skipped tagging: files already tagged")
 
         # Step 4: Cleanup WAV
-        os.remove(wav_path)
+        if os.path.exists(wav_path):
+            os.remove(wav_path)
         logging.info(f"✅ Complete: {ape_path}")
 
         # Step 5: Compress and delete original APE
@@ -126,15 +118,18 @@ def find_dirs_with_ape_cue(root_dir):
             cue_path = os.path.join(dirpath, cue_file)
             base = os.path.splitext(cue_file)[0]
             ape_path = os.path.join(dirpath, base + ".ape")
+            flac_path = os.path.join(dirpath, base + ".flac")
             if os.path.exists(ape_path):
                 work.append((ape_path, cue_path))
+            elif os.path.exists(flac_path):
+                work.append((flac_path, cue_path))
             else:
                 logging.warning(f"No matching APE for: {cue_path}")
     return work
 
 def main(root_dir):
     tasks = find_dirs_with_ape_cue(root_dir)
-    core = max(cpu_count()-2, 1)
+    core = 2
     logging.info(f"🧠 Using {core} cores")
     logging.info(f"📁 Found {len(tasks)} APE+CUE pairs")
 
